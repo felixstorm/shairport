@@ -61,6 +61,9 @@ void usage(char *progname) {
            "                    This value is in frames; default %d\n"
            "    -d          fork (daemonise)\n"
            "                    The PID of the child process is written to stdout\n"
+           "    -l command  set file to execute on play\n"
+           "    -s command  set file to execute on stop\n"
+           "    -t seconds  set delay before stop command is executed\n"
            "Run %s -o <output> -h to find the available options for a specific output\n"
            "\n", config.buffer_start_fill, progname);
 
@@ -76,7 +79,7 @@ void usage(char *progname) {
 
 int parse_options(int argc, char **argv) {
     int opt;
-    while ((opt = getopt(argc, argv, "+hdvp:a:o:b:")) > 0) {
+    while ((opt = getopt(argc, argv, "+hdvp:a:o:b:l:s:t:")) > 0) {
         switch (opt) {
             default:
                 printf("Unknown argument -%c\n", optopt);
@@ -100,6 +103,15 @@ int parse_options(int argc, char **argv) {
                 break;
             case 'b':
                 config.buffer_start_fill = atoi(optarg);
+                break;
+            case 'l':
+                config.play_start_file = optarg;
+                break;
+            case 's':
+                config.play_stop_file = optarg;
+                break;
+            case 't':
+                config.play_stop_file_delay = atoi(optarg);
                 break;
         }
     }
@@ -128,7 +140,9 @@ void signal_setup(void) {
     sa.sa_sigaction = &sig_shutdown;
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
-    sigaction(SIGCHLD, &sa, NULL);
+
+    // skip for now because of rtsp.c/play_exec() etc.
+    //sigaction(SIGCHLD, &sa, NULL);
 }
 
 int main(int argc, char **argv) {

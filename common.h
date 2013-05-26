@@ -25,6 +25,9 @@ typedef struct {
     audio_output *output;
     int buffer_start_fill;
     int daemonise;
+    char *play_start_file;
+    char *play_stop_file;
+    int play_stop_file_delay;
 } shairport_cfg;
 
 extern int debuglev;

@@ -29,11 +29,13 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/select.h>
+#include <sys/time.h>
 #include <signal.h>
 #include <netdb.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -50,6 +52,43 @@
 #ifndef AI_ADDRCONFIG
 #define AI_ADDRCONFIG 0
 #endif
+
+
+static bool play_started_status = false;
+static int play_stop_countdown = -1;
+
+static void play_exec(bool play_stated_target)
+{
+    if (play_started_status != play_stated_target)
+    {
+        char *play_exec_file = play_stated_target ? config.play_start_file : config.play_stop_file;
+        play_started_status = play_stated_target;
+
+        if (play_exec_file) {
+            if (fork())
+                return;
+                
+            debug(0, "play_exec() - executing %s\n", play_exec_file);
+            execlp(play_exec_file, play_exec_file, NULL);
+            
+            // exec will only return on error
+            perror("play_exec()");
+            _exit(1);
+        }
+    }
+}
+
+static void play_start()
+{
+    play_stop_countdown = -1;
+    play_exec(true);
+}
+
+static void play_stop()
+{
+    play_stop_countdown = config.play_stop_file_delay;
+}
+
 
 // only one thread is allowed to use the player at once.
 // it monitors the request variable (at least when interrupted)
@@ -326,6 +365,8 @@ static void handle_teardown(rtsp_conn_info *conn,
     resp->respcode = 200;
     msg_add_header(resp, "Connection", "close");
     please_shutdown = 1;
+
+    play_stop();
 }
 
 static void handle_flush(rtsp_conn_info *conn,
@@ -371,6 +412,8 @@ static void handle_setup(rtsp_conn_info *conn,
     msg_add_header(resp, "Session", "1");
 
     resp->respcode = 200;
+
+    play_start();
 }
 
 static void handle_ignore(rtsp_conn_info *conn,
@@ -768,23 +811,47 @@ void rtsp_listen_loop(void) {
 
     printf("Listening for connections.\n");
 
+    struct timespec select_timeout = { 1, 0 };
     int acceptfd;
-    while (select(maxfd+1, &fds, 0, 0, 0) >= 0) {
-        if (FD_ISSET(sockfd[0], &fds))
+    while (pselect(maxfd+1, &fds, 0, 0, &select_timeout, NULL) >= 0)
+    {
+        bool accept = false;
+        if (FD_ISSET(sockfd[0], &fds)) {
             acceptfd = sockfd[0];
-        if (FD_ISSET(sockfd[1], &fds) && sockfd[1])
+            accept = true;
+        }
+        if (FD_ISSET(sockfd[1], &fds) && sockfd[1]) {
             acceptfd = sockfd[1];
+            accept = true;
+        }
 
-        // for now, we do not track these and let them die of natural causes.
-        // XXX: this leaks threads; they need to be culled with pthread_tryjoin_np.
-        // XXX: acceptfd could change before the thread is up. which should never happen, but still.
-        pthread_t rtsp_conversation_thread;
-        pthread_create(&rtsp_conversation_thread, NULL, rtsp_conversation_thread_func, &acceptfd);
+        if (accept)
+        {
+            // for now, we do not track these and let them die of natural causes.
+            // XXX: this leaks threads; they need to be culled with pthread_tryjoin_np.
+            // XXX: acceptfd could change before the thread is up. which should never happen, but still.
+            pthread_t rtsp_conversation_thread;
+            pthread_create(&rtsp_conversation_thread, NULL, rtsp_conversation_thread_func, &acceptfd);
+
+            // evil hack to allow thread to pick up socket
+            usleep(100);
+        }
+        else
+        {
+            // only timeout, decrement and check play_stop_countdown
+            debug(2, "play_stop_countdown = %d\n", play_stop_countdown);
+            if (play_stop_countdown >= 0)
+            {
+                play_stop_countdown--;
+                if (play_stop_countdown < 0)
+                    play_exec(false);
+            }
+        }
 
         FD_SET(sockfd[0], &fds);
         if (sockfd[1])
             FD_SET(sockfd[1], &fds);
     }
-    perror("select");
+    perror("pselect");
     die("fell out of the RTSP select loop\n");
 }

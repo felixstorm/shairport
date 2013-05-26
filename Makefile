@@ -1,40 +1,29 @@
-
-MY_CFLAGS= $(shell pkg-config --cflags ao)
-MY_LDFLAGS= $(shell pkg-config --libs ao)
-ifeq ($(shell uname),FreeBSD)
-MY_LDFLAGS+= -lssl
-else
-MY_CFLAGS+= $(shell pkg-config --cflags openssl)
-MY_LDFLAGS+= $(shell pkg-config --libs openssl)
+ifeq ($(wildcard config.mk),)
+$(warning config.mk does not exist, configuring.)
+config.mk:
+	sh ./configure
+	$(MAKE) shairport
 endif
 
-CFLAGS:=-O2 -Wall $(MY_CFLAGS)
-LDFLAGS:=-lm -lpthread $(MY_LDFLAGS)
+-include config.mk
 
-OBJS=socketlib.o shairport.o alac.o hairtunes.o
-all: hairtunes shairport
+PREFIX ?= /usr/local
 
-hairtunes: hairtunes.c alac.o
-	$(CC) $(CFLAGS) -DHAIRTUNES_STANDALONE hairtunes.c alac.o -o $@ $(LDFLAGS)
+SRCS := shairport.c rtsp.c mdns.c common.c rtp.c player.c alac.c audio.c audio_dummy.c
 
-shairport: $(OBJS)
-	$(CC) $(CFLAGS) $(OBJS) -o $@ $(LDFLAGS)
+ifdef CONFIG_AO
+SRCS += audio_ao.c
+endif
+
+# default target
+all: shairport
+
+install: shairport
+	install -m 755 -d $(PREFIX)/bin
+	install -m 755 shairport $(PREFIX)/bin/shairport
+
+shairport: $(SRCS)
+	$(CC) $(CFLAGS) $(SRCS) $(LDFLAGS) -o shairport
 
 clean:
-	-@rm -rf hairtunes shairport $(OBJS)
-
-
-%.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
-
-
-prefix=/usr/local
-install: hairtunes shairport
-	install -D -m 0755 hairtunes $(DESTDIR)$(prefix)/bin/hairtunes
-	install -D -m 0755 shairport.pl $(DESTDIR)$(prefix)/bin/shairport.pl
-	install -D -m 0755 shairport $(DESTDIR)$(prefix)/bin/shairport
-
-.PHONY: all clean install
-
-.SILENT: clean
-
+	rm -f shairport
